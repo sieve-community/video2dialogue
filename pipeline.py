@@ -4,39 +4,6 @@ Convert YouTube Video into a Conversational Exchange Between Two Talking Avatars
 import sieve
 
 # Helper functions
-def conversation_to_list(conversation_text):
-    """
-    Convert conversation text to a list, 
-    with each turn of the conversation as an item in the list.
-    """
-    # Split the text by newline character
-    conversation_list = conversation_text.split('\n')
-    # Remove empty strings from the list
-    conversation_list = [line for line in conversation_list if line.strip()]
-
-    # Get a list of dialogues with each item as a tuple of format (speaker_id,text).
-    processed_conversation = []
-    for line in conversation_list:
-        if line.startswith("Person 1:"):
-            speaker = "Person 1"
-            text = line.replace("Person 1:", "").strip()
-        elif line.startswith("Person 2:"):
-            speaker = "Person 2"
-            text = line.replace("Person 2:", "").strip()
-        else:
-            # Find the position of the first colon
-            colon_index = line.find(":")
-            # If a colon is found, return the content after it
-            if colon_index != -1:
-                text = line[colon_index + 1:].strip()
-                speaker = line[:colon_index]
-            else: # If no colon is found, return the entire sentence
-                speaker = "Unknown"
-                text = line.strip()
-        processed_conversation.append((speaker, text))
-    
-    return processed_conversation 
-
 import subprocess
 def reencode_video(input_path, output_path):
     """
@@ -45,6 +12,7 @@ def reencode_video(input_path, output_path):
     command = [
         "ffmpeg",
         "-loglevel", "warning",
+        "-y",  # Overwrite output files without asking
         "-i", input_path,
         "-r", "30",
         "-c:v", "libx264",
@@ -109,6 +77,7 @@ def video2dialogue(youtube_url,voice1, voice2, image1 : sieve.File, image2: siev
     :param image2: input image for the avatar corresponding to speaker2.
     :return: The video featuring two avatars conversing, providing a summary of the YouTube video.
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # use remote Sieve functions
     youtube_to_mp4 = sieve.function.get("sieve/youtube_to_mp4")
@@ -129,34 +98,80 @@ def video2dialogue(youtube_url,voice1, voice2, image1 : sieve.File, image2: siev
     prompt = "Summarize the video into a conversation between two people. Denote first speaker as 'Person 1' and second speaker as 'Person 2'."
     fps = 1
     audio_context = True
-    summary_as_conversation = visual_summarizer.run(youtube_video, backend, prompt, fps, audio_context)
+    function_json = {
+    "type": "list",
+    "items": {
+        "type": "object",
+        "properties": {
+        "speaker_name": {
+            "type": "string",
+            "description": "The speaker name"
+        },
+        "dialogue": {
+            "type": "string",
+            "description": "dialogue"
+        }
+        }
+    }
+    }
+    summary_as_conversation = visual_summarizer.run(youtube_video, backend, prompt, fps, audio_context,function_json)
     print("Summary: \n", summary_as_conversation)
     
-    # Step 3. Obtain conversation text as list
-    summary_conversation_list = conversation_to_list(summary_as_conversation)
-    print('Processed Conversation list:\n ',summary_conversation_list)
-    
-    # Step 4. Convert each conversation-turn's text to speech & generate its talking avatar.
+    # Step 3. Convert each conversation-turn's text to speech & generate its talking avatar.
     # tts inputs:
     print("generating tts audio and its avatar video...")
     reference_audio = sieve.File(url="") #not passing this argument results throws error.
     
     turn = 0
     normalized_videos = []
-    for speaker, text in summary_conversation_list:
-        turn += 1
-        if turn % 2 != 0: # odd-turn of conversation
-            target_audio = tts.run(voice1, text,reference_audio,"curiosity")
-            avatar_video = portrait_avatar.run(source_image=image1, driving_audio=target_audio,aspect_ratio = "16:9")
-            print(f'odd turn: done tts and avatar generation for turn-{turn}')
-        else: #even-turn
-            target_audio = tts.run(voice2, text, reference_audio,"curiosity")
-            avatar_video = portrait_avatar.run(source_image=image2, driving_audio=target_audio,aspect_ratio = "16:9")
-            print(f'even turn: done tts and avatar generation for turn-{turn}')
-        #Encode generated video to ensure same frame rate, video codec, audio codec and similar video quality.
-        normalized_video = f"normalized_{turn}.mp4"
-        reencode_video(avatar_video.path, normalized_video)
-        normalized_videos.append(normalized_video)
+    turn_results = {}  # Dictionary to store normalized videos by turn
+
+   # ThreadPoolExecutor for concurrent execution
+    with ThreadPoolExecutor() as executor:
+        # List to keep track of all submitted jobs
+        future_to_turn = {}
+
+        # Submit TTS and avatar generation jobs
+        for entry in summary_as_conversation:
+            turn += 1
+            if turn % 2 != 0:  # Odd-turn of conversation
+                target_audio_future = tts.push(voice1, entry['dialogue'], reference_audio, "curiosity")
+                avatar_video_future = portrait_avatar.push(
+                    source_image=image1, 
+                    driving_audio=target_audio_future.result(), 
+                    aspect_ratio="1:1"
+                )
+            else:  # Even-turn
+                target_audio_future = tts.push(voice2, entry['dialogue'], reference_audio, "curiosity")
+                avatar_video_future = portrait_avatar.push(
+                    source_image=image2, 
+                    driving_audio=target_audio_future.result(), 
+                    aspect_ratio="1:1"
+                )
+
+            # Store the avatar video future and turn in a dictionary for tracking
+            future_to_turn[avatar_video_future] = turn
+
+        # Process avatar generation results as they complete
+        for future in as_completed(future_to_turn):
+            turn = future_to_turn[future]
+            try:
+                avatar_video = future.result()  # Wait for the avatar video to complete
+                print(f"Done TTS and avatar generation for turn-{turn}")
+                
+                # Re-encode the video
+                normalized_video = f"normalized_{turn}.mp4"
+                reencode_video(avatar_video.path, normalized_video)
+                
+                # Store normalized video path in a dictionary
+                turn_results[turn] = normalized_video
+            except Exception as e:
+                print(f"Error processing turn-{turn}: {e}")
+    
+    # Append normalized videos to the list in the sequential order of turns
+    for turn in sorted(turn_results.keys()):
+        normalized_videos.append(turn_results[turn])
+        
     print("done generating video avatars for all individual conversation turns!")
     
     # Step 5: Merge generated avatar videos 
@@ -167,11 +182,9 @@ def video2dialogue(youtube_url,voice1, voice2, image1 : sieve.File, image2: siev
     return output_video
 
 if __name__ == "__main__":
-    # output_path = "energyClams_avatar_video.mp4"  
     youtube_url = "https://youtube.com/shorts/D-F32ieZ4WA?si=X7QzBXMEuJM6d-E4"
     odd_voice = "cartesia-commercial-man"
     even_voice = "cartesia-sweet-lady"
-    odd_image = sieve.File(url="https://storage.googleapis.com/sieve-prod-us-central1-public-file-upload-bucket/c4d968f5-f25a-412b-9102-5b6ab6dafcb4/342623d3-10ce-4f43-8c2d-d445639225ac-boy.jpeg")
-    even_image = sieve.File(url="https://storage.googleapis.com/sieve-prod-us-central1-public-file-upload-bucket/dea37047-9b88-44b7-aacb-a5f4745f1f2d/db7a439e-24f8-40cd-b29d-43935e1a2ae7-input-source_image.jpg")
-
+    odd_image = sieve.File('boy_cropped.jpeg')
+    even_image = sieve.File('girl_cropped.jpeg')
     output_video = video2dialogue(youtube_url,odd_voice,even_voice,odd_image,even_image)
