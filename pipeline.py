@@ -16,6 +16,9 @@ def reencode_video(input_path, output_path):
         "-preset", "fast",
         "-crf", "23",
         "-c:a", "aac",
+        "-ar", "48000",
+        "-strict", "experimental",
+        "-vsync", "1",
         output_path
     ]
 
@@ -31,22 +34,27 @@ def merge_videos(video_list, output_path):
     """
     Merge videos listed in the video_list into a single video.
     """
-    # Write video list to a text file for concatenation
-    with open('video_list_file.txt', 'w') as f:
-        for video in video_list:
-            f.write(f"file '{video}'\n")
-    
-    command = [
-        "ffmpeg",
-        "-f", "concat",
-        "-safe", "0",
-        "-i", "video_list_file.txt",
-        "-loglevel", "warning",
-        "-c", "copy",
-        output_path     
-    ]
-    
+    temp_file = 'video_list_file.txt'
     try:
+        with open(temp_file, 'w') as f:
+            for video in video_list:
+                f.write(f"file '{video}'\n")
+        
+        command = [
+            "ffmpeg",
+            "-f", "concat",
+            "-safe", "0",
+            "-i", temp_file,
+            "-loglevel", "warning",
+            "-c:v", "libx264",
+            "-preset", "fast",
+            "-c:a", "aac",
+            "-ar", "48000",
+            "-vsync", "1",
+            "-async", "1",
+            output_path     
+        ]
+        
         result = subprocess.run(command, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         print("Videos merged successfully")
         print(result.stdout)
@@ -91,7 +99,12 @@ def video2dialogue(
     
     # Step 2: Generate conversational summary
     print("Summarizing video...")
-    summary_prompt = "Summarize the video into a conversation between two people. Denote first speaker as 'Person 1' and second speaker as 'Person 2'."
+    summary_prompt = """Summarize the video into a conversation between two people. 
+    - Denote first speaker as 'Person 1' and second speaker as 'Person 2'.
+    - Make sure no single dialogue is greater than 120 characters.
+    - Ensure the flow of the conversation is natural and coherent, as if two close friends are conversing.
+    - Make sure both speakers alternate in asking questions, answering, making jokes, stating opinions, and more.
+    """
     function_json = {
         "type": "list",
         "items": {
@@ -162,6 +175,7 @@ if __name__ == "__main__":
     youtube_url = "https://youtube.com/shorts/D-F32ieZ4WA?si=X7QzBXMEuJM6d-E4"
     voice1 = "cartesia-commercial-man"
     voice2 = "cartesia-sweet-lady"
-    image1 = sieve.File('boy_cropped.jpeg')
+    image1 = sieve.File(url='boy_cropped.jpeg')
     image2 = sieve.File('girl_cropped.jpeg')
-    output_video = video2dialogue(youtube_url, odd_voice, even_voice, odd_image, even_image)
+    output_video = video2dialogue(youtube_url, voice1, voice2, image1, image2)
+    print(output_video)

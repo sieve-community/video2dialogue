@@ -11,7 +11,7 @@ This Sieve pipeline converts a YouTube video into an interactive dialogue betwee
 
 ## Tutorial
 
-A detailed explanation of the pipeline is provided in this [tutorial](<link>).
+A detailed explanation of the pipeline is provided in this [tutorial](https://sievedata.com/blog/transform-youtube-videos-into-notebooklm-like-conversational-avatars-with-sieve-notebooklm-api-guide).
 
 ## Options
 
