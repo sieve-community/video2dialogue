@@ -25,7 +25,7 @@ You can find your API key at [https://www.sievedata.com/dashboard/settings](http
 Then deploy the function to your account:
 ```bash
 git clone https://github.com/sieve-community/video2dialogue
-cd video2dialogue/parallelized_version
+cd video2dialogue
 sieve deploy pipeline.py
 ```
 
