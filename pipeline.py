@@ -160,8 +160,8 @@ def video2dialogue(
 
 if __name__ == "__main__":
     youtube_url = "https://youtube.com/shorts/D-F32ieZ4WA?si=X7QzBXMEuJM6d-E4"
-    odd_voice = "cartesia-commercial-man"
-    even_voice = "cartesia-sweet-lady"
-    odd_image = sieve.File('boy_cropped.jpeg')
-    even_image = sieve.File('girl_cropped.jpeg')
+    voice1 = "cartesia-commercial-man"
+    voice2 = "cartesia-sweet-lady"
+    image1 = sieve.File('boy_cropped.jpeg')
+    image2 = sieve.File('girl_cropped.jpeg')
     output_video = video2dialogue(youtube_url, odd_voice, even_voice, odd_image, even_image)
